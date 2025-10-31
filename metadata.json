@@ -1,0 +1,7 @@
+{
+  "name": "Audio Scribe & Translate",
+  "description": "An application to record audio from your microphone, get a real-time transcription, translate it to a selected language, and download the result as an SRT file.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
