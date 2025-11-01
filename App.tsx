@@ -3,8 +3,6 @@ import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { AppStatus, Language } from './types.ts';
 import { LANGUAGES, TRANSCRIPTION_MODELS } from './constants.ts';
 
-const IS_API_KEY_MISSING = !process.env.API_KEY;
-
 // Custom type for a timed transcription segment
 interface TranscriptionSegment {
   startTime: number; // in milliseconds
@@ -186,6 +184,11 @@ const ProgressBar = ({ progress, label }: { progress: number; label: string }) =
 );
 
 const App: React.FC = () => {
+    // API Key State
+    const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('userApiKey') || '');
+    const [tempApiKey, setTempApiKey] = useState<string>('');
+    const isApiKeyMissing = !apiKey;
+
     // General state
     const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
     const [error, setError] = useState<string | null>(null);
@@ -232,6 +235,27 @@ const App: React.FC = () => {
     const transcription = segments.map(s => s.text).join(' ');
     const translation = translatedSegments.map(s => s.text).join(' ');
     const transcriptionForDisplay = (segments.map(s => s.text).join(' ') + ' ' + currentSegment.text).trim();
+
+    // API Key Management
+    useEffect(() => {
+        if (apiKey) {
+            localStorage.setItem('userApiKey', apiKey);
+        } else {
+            localStorage.removeItem('userApiKey');
+        }
+    }, [apiKey]);
+
+    const handleSaveApiKey = () => {
+        if (tempApiKey.trim()) {
+            setApiKey(tempApiKey.trim());
+            setTempApiKey(''); // Clear input after save
+        }
+    };
+
+    const handleClearApiKey = () => {
+        setApiKey('');
+    };
+
 
     const resetScribeState = () => {
         setStatus(AppStatus.IDLE);
@@ -311,12 +335,13 @@ const App: React.FC = () => {
     }, [cleanupLiveRecording]);
 
     const handleStartRecording = useCallback(async () => {
+        if (isApiKeyMissing) return;
         resetScribeState();
         setStatus(AppStatus.RECORDING);
         recordingStartTimeRef.current = Date.now();
         
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ apiKey });
             const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = audioStream;
 
@@ -398,7 +423,7 @@ const App: React.FC = () => {
             setError(errorMessage);
             setStatus(AppStatus.ERROR);
         }
-    }, [handleStopRecording]);
+    }, [handleStopRecording, apiKey, isApiKeyMissing]);
 
     const startProgressSimulation = (label: string) => {
         setProgress(0);
@@ -431,9 +456,9 @@ const App: React.FC = () => {
     };
 
     const transcribeAudioChunk = async (mimeType: string, buffer: ArrayBuffer, timeOffsetSeconds: number) => {
-        if (isTranscriptionCancelledRef.current) return;
+        if (isTranscriptionCancelledRef.current || isApiKeyMissing) return;
         
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const ai = new GoogleGenAI({ apiKey });
         const base64Data = encode(new Uint8Array(buffer));
         
         const audioPart = { inlineData: { mimeType, data: base64Data } };
@@ -557,6 +582,7 @@ const App: React.FC = () => {
     };
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (isApiKeyMissing) return;
         const file = event.target.files?.[0];
         if (file) {
             if (!file.type.startsWith('audio/')) {
@@ -584,13 +610,13 @@ const App: React.FC = () => {
     };
 
     const handleTranslate = async () => {
-        if (segments.length === 0) return;
+        if (segments.length === 0 || isApiKeyMissing) return;
         setStatus(AppStatus.TRANSLATING);
         startProgressSimulation('Translating text...');
         setTranslatedSegments([]);
         setError(null);
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ apiKey });
             const selectedLang = LANGUAGES.find(l => l.code === targetLanguage);
 
             const prompt = `Translate the "text" value in each object of the following JSON array to ${selectedLang?.name || 'the selected language'}.
@@ -648,7 +674,7 @@ ${JSON.stringify(segments)}
     };
 
     const handlePlayTranslation = async () => {
-        if (!translation || ttsStatus === 'loading') return;
+        if (!translation || ttsStatus === 'loading' || isApiKeyMissing) return;
         if (ttsStatus === 'playing') {
             handleStopSpeaking();
             return;
@@ -658,7 +684,7 @@ ${JSON.stringify(segments)}
         setError(null);
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ apiKey });
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-preview-tts',
                 contents: [{ parts: [{ text: translation }] }],
@@ -794,6 +820,7 @@ ${JSON.stringify(segments)}
     };
 
     const handleSrtFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        if (isApiKeyMissing) return;
         const file = event.target.files?.[0];
         if (file) {
             resetSrtState();
@@ -837,14 +864,14 @@ ${JSON.stringify(segments)}
     };
     
     const handleSrtTranslate = async () => {
-        if (srtSegments.length === 0) return;
+        if (srtSegments.length === 0 || isApiKeyMissing) return;
         setSrtStatus('processing');
         setSrtError(null);
         setTranslatedSrtContent(null);
         setSrtProgress(0);
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ apiKey });
             const selectedLang = LANGUAGES.find(l => l.code === targetLanguage);
             const allTextsToTranslate = srtSegments.map(s => s.text);
             const allTranslatedTexts: string[] = [];
@@ -938,12 +965,43 @@ ${JSON.stringify(chunk)}
                 </header>
 
                 <main className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl shadow-2xl">
-                    {IS_API_KEY_MISSING && (
-                        <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-4 py-3 rounded-lg text-center m-6">
-                            <p><strong>Configuration Error:</strong> The API key is not set. Please ensure the <code>API_KEY</code> environment variable is configured to use the application.</p>
+                     <div className="p-6 md:p-8 border-b border-gray-700">
+                        <h3 className="text-lg font-semibold text-center text-white mb-4">API Key Configuration</h3>
+                        {isApiKeyMissing ? (
+                            <div className="bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-4 py-3 rounded-lg text-center mb-4">
+                                <p><strong>Action Required:</strong> Please enter your Google AI API key to use the application. Get your key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="underline font-bold">Google AI Studio</a>.</p>
+                            </div>
+                        ) : (
+                            <div className="bg-green-900/50 border border-green-700 text-green-300 px-4 py-3 rounded-lg text-center mb-4">
+                                <p>API Key is configured. You can now use the app.</p>
+                            </div>
+                        )}
+                        <div className="flex flex-col sm:flex-row items-center gap-3">
+                            <input
+                                type="password"
+                                placeholder="Enter your API Key here"
+                                value={tempApiKey}
+                                onChange={(e) => setTempApiKey(e.target.value)}
+                                className="w-full flex-grow bg-gray-700 border-gray-600 text-white rounded-md px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                            />
+                             <button
+                                onClick={handleSaveApiKey}
+                                disabled={!tempApiKey.trim()}
+                                className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition disabled:bg-gray-500 disabled:cursor-not-allowed"
+                            >
+                                Save Key
+                            </button>
+                            {!isApiKeyMissing && (
+                                <button
+                                    onClick={handleClearApiKey}
+                                    className="w-full sm:w-auto px-6 py-2.5 bg-red-600 text-white font-semibold rounded-md shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50 transition"
+                                >
+                                    Clear Key
+                                </button>
+                            )}
                         </div>
-                    )}
-                    
+                    </div>
+
                     <div className="flex border-b border-gray-700 px-6">
                         <button onClick={() => setActiveTab('scribe')} className={tabClass('scribe')}>Audio Scribe & Translate</button>
                         <button onClick={() => setActiveTab('srtTranslator')} className={tabClass('srtTranslator')}>SRT Translator</button>
@@ -975,7 +1033,7 @@ ${JSON.stringify(chunk)}
                                         <>
                                             <button
                                                 onClick={handleStartRecording}
-                                                disabled={isProcessing || IS_API_KEY_MISSING}
+                                                disabled={isProcessing || isApiKeyMissing}
                                                 className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white font-semibold rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50 transition-all duration-300 ease-in-out transform hover:scale-105 disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100"
                                             >
                                                 <MicIcon className="w-6 h-6" />
@@ -986,7 +1044,7 @@ ${JSON.stringify(chunk)}
 
                                             <button
                                                 onClick={() => fileInputRef.current?.click()}
-                                                disabled={isProcessing || IS_API_KEY_MISSING}
+                                                disabled={isProcessing || isApiKeyMissing}
                                                 className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition-all duration-300 ease-in-out transform hover:scale-105 disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100"
                                             >
                                                 <UploadIcon className="w-6 h-6" />
@@ -1051,7 +1109,7 @@ ${JSON.stringify(chunk)}
                                                 {translation && (
                                                     <button
                                                         onClick={handlePlayTranslation}
-                                                        disabled={ttsStatus === 'loading' || IS_API_KEY_MISSING}
+                                                        disabled={ttsStatus === 'loading' || isApiKeyMissing}
                                                         className="p-1.5 rounded-full text-gray-400 hover:bg-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                                         aria-label={ttsStatus === 'playing' ? 'Stop translation' : 'Listen to translation'}
                                                         title={ttsStatus === 'playing' ? 'Stop translation' : 'Listen to translation'}
@@ -1144,7 +1202,7 @@ ${JSON.stringify(chunk)}
                                     <div className="flex flex-col items-center justify-center gap-4">
                                         <button
                                             onClick={() => srtFileInputRef.current?.click()}
-                                            disabled={srtStatus === 'processing' || IS_API_KEY_MISSING}
+                                            disabled={srtStatus === 'processing' || isApiKeyMissing}
                                             className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-lg hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 transition-all duration-300 ease-in-out transform hover:scale-105 disabled:bg-gray-500 disabled:cursor-not-allowed"
                                         >
                                             <FileTextIcon className="w-6 h-6" />
