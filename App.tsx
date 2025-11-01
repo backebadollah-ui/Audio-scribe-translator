@@ -228,8 +228,6 @@ const App: React.FC = () => {
     const currentSegmentRef = useRef(currentSegment);
     currentSegmentRef.current = currentSegment;
 
-    const ai = useMemo(() => new GoogleGenAI({ apiKey: process.env.API_KEY }), []);
-
     // Derived state for display
     const transcription = segments.map(s => s.text).join(' ');
     const translation = translatedSegments.map(s => s.text).join(' ');
@@ -318,6 +316,7 @@ const App: React.FC = () => {
         recordingStartTimeRef.current = Date.now();
         
         try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             streamRef.current = audioStream;
 
@@ -399,7 +398,7 @@ const App: React.FC = () => {
             setError(errorMessage);
             setStatus(AppStatus.ERROR);
         }
-    }, [ai, handleStopRecording]);
+    }, [handleStopRecording]);
 
     const startProgressSimulation = (label: string) => {
         setProgress(0);
@@ -433,7 +432,8 @@ const App: React.FC = () => {
 
     const transcribeAudioChunk = async (mimeType: string, buffer: ArrayBuffer, timeOffsetSeconds: number) => {
         if (isTranscriptionCancelledRef.current) return;
-
+        
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const base64Data = encode(new Uint8Array(buffer));
         
         const audioPart = { inlineData: { mimeType, data: base64Data } };
@@ -590,6 +590,7 @@ const App: React.FC = () => {
         setTranslatedSegments([]);
         setError(null);
         try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const selectedLang = LANGUAGES.find(l => l.code === targetLanguage);
 
             const prompt = `Translate the "text" value in each object of the following JSON array to ${selectedLang?.name || 'the selected language'}.
@@ -657,6 +658,7 @@ ${JSON.stringify(segments)}
         setError(null);
 
         try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-preview-tts',
                 contents: [{ parts: [{ text: translation }] }],
@@ -842,6 +844,7 @@ ${JSON.stringify(segments)}
         setSrtProgress(0);
 
         try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const selectedLang = LANGUAGES.find(l => l.code === targetLanguage);
             const allTextsToTranslate = srtSegments.map(s => s.text);
             const allTranslatedTexts: string[] = [];
